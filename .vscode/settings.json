@@ -1,0 +1,5 @@
+{
+    "code-runner.clearPreviousOutput": true,
+    "code-runner.runInTerminal": true,
+    "python.autoComplete.addBrackets": true
+}

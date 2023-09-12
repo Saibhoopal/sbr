@@ -1,0 +1,24 @@
+$bucket = "tyrelltest"
+$key = "TwiztedRed5 stream manager api calls.postman_collection.json"
+$file = Get-S3Object -BucketName $bucket -Key $Key
+Copy-S3Object -SourceBucket $bucket -SourceKey $($file.Key) -LocalFolder 'C:\Apicalls'
+
+
+################################### Record Set Creation ##############################################################
+$DomainName = "$R53Domain."
+$HostedZone = @(Get-R53HostedZones | Where-Object {$_.Name -eq $DomainName})
+$HostedZoneId = $HostedZone.Id.split("/")[2]
+$instance_id = Get-EC2InstanceMetadata -Category instanceId
+$my_ip = (Get-Ec2Instance -InstanceId $instance_id).Instances.PrivateIpAddress
+
+$Name=$my_ip.split(".")[2]
+$Subdomain= $Recordsetsubdomainprefix
+$Change                          = New-Object Amazon.Route53.Model.Change
+# UPSERT: If a resource record set doesn't already exist, AWS creates it. If it does, update it with values in the request
+$Change.Action                   = "UPSERT"
+$Change.ResourceRecordSet        = New-Object Amazon.Route53.Model.ResourceRecordSet
+$Change.ResourceRecordSet.Name   = "$Subdomain.$R53Domain"
+$Change.ResourceRecordSet.Type   = "A"
+$Change.ResourceRecordSet.TTL    = 300
+$Change.ResourceRecordSet.ResourceRecords.Add(@{Value="$my_ip"})
+Edit-R53ResourceRecordSet -HostedZoneId $HostedZoneId -ChangeBatch_Changes $Change | Out-Null

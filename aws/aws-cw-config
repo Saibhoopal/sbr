@@ -18,3 +18,32 @@ sudo sed -i 's/{instance_id}/node_manager_{instance_id}/g' /opt/aws/amazon-cloud
 sudo systemctl enable amazon-cloudwatch-agent.service
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -m ec2 -a status
+
+
+############# CW config for windows ##############
+$parameters = @{
+	Uri = 'https://s3.amazonaws.com/amazoncloudwatch-agent/windows/amd64/latest/AmazonCloudWatchAgent.zip'
+	OutFile = "$env:TEMP\AmazonCloudWatchAgent.zip"
+}
+Invoke-WebRequest @parameters
+Expand-Archive -Path "$env:TEMP\AmazonCloudWatchAgent.zip" -DestinationPath "$env:TEMP\AmazonCloudWatchAgent"
+Set-Location -Path "$env:TEMP\AmazonCloudWatchAgent"
+.\install.ps1
+Set-Location -Path 'C:\Program Files\Amazon\AmazonCloudWatchAgent\'
+
+## copy config file from s3 ####################
+
+$file = Get-S3Object -BucketName $bucket -Key 'config.json'
+Copy-S3Object -SourceBucket $bucket -SourceKey $($file.Key) -LocalFolder 'C:\Program Files\Amazon\AmazonCloudWatchAgent'
+## edit the config file ###################
+$json = Get-Content -Path "C:\Program Files\Amazon\AmazonCloudWatchAgent\config.json" -Raw | ConvertFrom-Json
+$cinegy_Mvwr_Logs_Path = "C:\ProgramData\Cinegy\Multiviewer\Logs\*"
+$newLogStreamName = "$AirengineName`_{instance_id}"
+$json.logs.logs_collected.files.collect_list | ForEach-Object {
+    $_.log_stream_name = $newLogStreamName -replace '\{instance_id\}', $_.log_stream_name
+	$_.file_path = $Cinegy_Mvwr_Logs_Path -replace 'C:\\Logs\\*', $_.file_path
+}
+$jsonString = $json | ConvertTo-Json -Depth 10 | Set-Content -Path "C:\Program Files\Amazon\AmazonCloudWatchAgent\config.json"
+
+##Start the CloudWatch agent
+.\amazon-cloudwatch-agent-ctl.ps1 -a fetch-config -m ec2 -c file:'C:\Program Files\Amazon\AmazonCloudWatchAgent\config.json' -s

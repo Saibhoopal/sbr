@@ -1,9 +1,18 @@
 
 ########## CW config for lunux instances(ubuntu) #########
+#!/bin/bash
+##### install aws cli #########
+sudo apt-get update -y
+sudo apt-get install awscli -y
 
+###### Adding tags to ec2 ########
 INSTANCE_ID=$(ec2metadata --instance-id)
 aws ec2 create-tags --resources $INSTANCE_ID --tags Key=Node_Type,Value=node_manager
 aws ec2 monitor-instances --instance-ids $INSTANCE_ID 
+
+####### download and configure Clouwatch #######
+sudo wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
 sudo aws s3 cp s3://$LOGS_S3_BUCKET/config.json /opt/aws/amazon-cloudwatch-agent/bin/
 sudo sed -i 's/{instance_id}/node_manager_{instance_id}/g' /opt/aws/amazon-cloudwatch-agent/bin/config.json    
 sudo systemctl enable amazon-cloudwatch-agent.service

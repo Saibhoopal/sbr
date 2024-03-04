@@ -1,0 +1,75 @@
+name: 'environment resources workflow'
+
+on:
+  push:
+    branches:
+      - dev
+      - uat
+      - prod
+      - main
+      - feature
+
+jobs:
+  terraform:
+    name: 'Terraform-dev'
+    runs-on: ubuntu-latest
+
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      
+      - name: Check Branch
+        id: check-branch
+        run: |
+            if [[ ${{ github.event.ref }} =~ ^refs/heads/feature-OTT-[0-9]+$ ]]; then
+                  echo ::set-output name=match::true
+            fi
+            
+      - name: if feature, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/feature' && github.event_name == 'push' #steps.check-branch.outputs.match == 'true'
+        #if: github.ref == 'refs/heads/feature-OTT-304' && github.event_name == 'push'
+        run: |
+          sh ./script.sh      
+        env:
+          org_name: PPBOTT
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: "dev"
+
+      - name: if dev, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+        run: |
+          sh ./script.sh      
+        env:
+          org_name: PPBOTT
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: "dev"
+
+      - name: if uat, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/uat' && github.event_name == 'push'
+        run: |
+          sh ./script.sh
+        env:
+          org_name: PPBOTT
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: "uat"
+      
+      - name: if main, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          sh ./script.sh
+        env:
+          org_name: PPBOTT
+          TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+          TF_WORKSPACE: "prod"

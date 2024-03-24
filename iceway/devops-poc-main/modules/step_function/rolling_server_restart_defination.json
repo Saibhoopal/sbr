@@ -1,0 +1,102 @@
+{
+  "Comment": "Rolling Server Restarts",
+  "StartAt": "Action",
+  "States": {
+    "Action": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.service_restart",
+          "StringEquals": "jease",
+          "Next": "Restart_Jease"
+        },
+        {
+          "Variable": "$.service_restart",
+          "StringEquals": "ota",
+          "Next": "Restart_Ota"
+        },
+        {
+          "Variable": "$.service_restart",
+          "StringEquals": "touch",
+          "Next": "Restart_Touch"
+        }
+      ],
+      "Default": "Finish"
+    },
+    "Restart_Jease": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "IterateTargets"
+    },
+    "Restart_Ota": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "IterateTargets"
+    },
+    "Restart_Touch": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "IterateTargets"
+    },
+    "IterateTargets": {
+      "Type": "Map",
+      "ItemsPath": "$.currentInstance",
+      "MaxConcurrency": 1,
+      "ResultPath": "$.currentTarget",
+      "Iterator": {
+        "StartAt": "Deregister_Target",
+        "States": {
+          "Deregister_Target": {
+            "Type": "Task",
+            "Resource": "${var.lambda_function_arn}",
+            "Next": "Restart_Target"
+          },
+          "Restart_Target": {
+            "Type": "Task",
+            "Resource": "${var.lambda_function_arn}",
+            "Next": "Register_Target"
+          },
+          "Register_Target": {
+            "Type": "Task",
+            "Resource": "${var.lambda_function_arn}",
+            "Next": "Target_Health_Check"
+          },
+          "Target_Health_Check": {
+            "Type": "Task",
+            "Resource": "${var.lambda_function_arn}",
+            "Next": "CheckHealthStatus"
+          },
+          "CheckHealthStatus": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.instance_health_status[0].health_status",
+                "StringEquals": "healthy",
+                "Next": "ProceedTo_NextTarget"
+              }
+            ],
+            "Default": "ExitStateMachine"
+          },
+          "ProceedTo_NextTarget": {
+            "Type": "Pass",
+            "Result": "Proceeding to Iteration Next Target",
+            "End": true
+          },
+          "ExitStateMachine": {
+            "Type": "Fail",
+            "Error": "UnhealthyInstance",
+            "Cause": "Instance is not healthy, exiting state machine"
+          }
+        }
+      },
+      "End": true
+    },
+    "Finish": {
+      "Type": "Succeed"
+    }
+  }
+}
+

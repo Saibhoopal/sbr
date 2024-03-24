@@ -50,5 +50,7 @@ def clone_code(event, context):
 https://levelup.gitconnected.com/setup-ssh-between-jenkins-and-github-e4d7d226b271
 
 
+###### Protect your application using AWS Global Accelerator #####
+https://sureshkanniappan.medium.com/protect-your-application-using-aws-global-accelerator-a3026a4c0cd2
 
 

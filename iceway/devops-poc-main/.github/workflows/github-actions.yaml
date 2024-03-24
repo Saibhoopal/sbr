@@ -1,0 +1,50 @@
+name: 'environment resources workflow'
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+
+      - name: Check Branch
+        id: check-branch
+        run: |
+            if [[ ${{ github.event.ref }} =~ ^refs/heads/feature-OTT-[0-9]+$ ]]; then
+                  echo ::set-output name=match::true
+            fi
+
+      - name: if dev, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+        run: |
+          sh ./script.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: if main, terraform init, validate, plan, apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          sh ./script.sh        
+        env:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}          
+

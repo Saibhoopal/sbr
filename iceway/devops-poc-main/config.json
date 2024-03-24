@@ -1,0 +1,68 @@
+{
+    "jease": {
+        "default":{
+            "service":"jease",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        },
+        "v.0.1.0":{
+            "service":"jease",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        }
+    },
+    "ota": {
+        "default":{
+            "service":"ota",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        },
+        "v.0.1.0":{
+            "service":"ota",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        }
+    },
+    "touch": {
+        "default":{
+            "service":"touch",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        },
+        "v.0.1.0":{
+            "service":"touch",
+            "script_name":"config_script.sh",
+            "script_source": "s3://theiceway/config_script.sh",
+            "script_destination": "/tmp",
+            "war_source": "s3://theiceway/jease.war",
+            "war_destination": "/opt/jease/apache-tomcat/webapps",
+            "db_source": "s3://theiceway/db.zip",
+            "db_destination": "/opt/jease/db"            
+        }
+    }    
+}

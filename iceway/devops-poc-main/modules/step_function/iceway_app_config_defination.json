@@ -1,0 +1,49 @@
+{
+  "Comment": "Configure_App_Servers",
+  "StartAt": "Action",
+  "States": {
+    "Action": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.server_type",
+          "StringEquals": "jease",
+          "Next": "Configure_Jease"
+        },
+        {
+          "Variable": "$.server_type",
+          "StringEquals": "ota",
+          "Next": "Configure_Ota"
+        },
+        {
+          "Variable": "$.server_type",
+          "StringEquals": "touch",
+          "Next": "Configure_Touch"
+        }
+      ],
+      "Default": "Finish"
+    },
+    "Configure_Jease": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "Finish"
+    },
+    "Configure_Ota": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "Finish"
+    },
+    "Configure_Touch": {
+      "Type": "Task",
+      "Resource": "${var.lambda_function_arn}",
+      "ResultPath": "$.currentInstance",
+      "Next": "Finish"
+    },
+    "Finish": {
+      "Type": "Succeed"
+    }
+  }
+}
+

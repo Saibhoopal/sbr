@@ -1,0 +1,165 @@
+name: "Deploy [DEV] Webapp - Dynamic"
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        required: true
+        type: string
+      target_group_arn:
+        required: true
+        type: string
+      service:
+        required: true
+        type: string        
+      instance_number:
+        required: true
+        type: string
+        description: "The server number (e.g., 01, 02, etc.)"
+#  workflow_call:         
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest #[self-hosted, linux, x64] #
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_1 }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_1 }}
+          aws-region: ${{ secrets.AWS_REGION }}             #aws sts get-caller-identit
+      - name: Verify AWS Permissions
+        run: |
+          aws elbv2 describe-target-health \
+            --target-group-arn "${{ inputs.target_group_arn }}" \
+            --query "TargetHealthDescriptions[].Target.Id" \
+            --output text
+
+#      - name: Debug AWS Context
+#        run: |
+#          echo "=== ENVIRONMENT ==="
+#          printenv | grep -i 'AWS\|GITHUB'
+#          echo "=== METADATA ==="
+#          curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/
+#          echo "=== PERMISSIONS ==="
+#          aws iam list-attached-role-policies --role-name $(curl -s http://169.254.169.254/latest/meta-data/iam/info | jq -r '.InstanceProfileArn' | cut -d'/' -f2)
+
+      - name: Debug AWS Context
+        run: |
+          echo "=== ENVIRONMENT ==="
+          printenv | grep -i 'AWS\|GITHUB'
+          echo "=== METADATA ==="
+          TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+          curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/info || echo "IMDS access failed"
+          echo "=== PERMISSIONS ==="
+          INSTANCE_PROFILE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/info | jq -r '.InstanceProfileArn' | cut -d'/' -f2)
+#          if [ -n "$INSTANCE_PROFILE" ]; then
+#            aws iam list-attached-role-policies --role-name $INSTANCE_PROFILE
+#          else
+#            echo "Could not retrieve instance profile name"
+#          fi
+    
+      - name: Deregister from Target Group
+        id: deregister
+        run: |
+          aws elbv2 deregister-targets \
+            --target-group-arn "${{ inputs.target_group_arn }}" \
+            --targets Id="${{ inputs.instance_id }}"
+          echo "Deregistered instance ${{ inputs.instance_id }}"
+
+      - name: Wait for Draining Completion
+        id: wait_for_draining
+        run: |
+          echo "Checking draining status..."
+          for i in {1..30}; do
+            STATE=$(aws elbv2 describe-target-health \
+              --target-group-arn "${{ inputs.target_group_arn }}" \
+              --targets Id="${{ inputs.instance_id }}" \
+              --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+              --output text)
+            
+            if [ "$STATE" = "unused" ]; then
+              echo "Draining completed"
+              exit 0
+            fi
+            
+            echo "Waiting for draining to complete (attempt $i/30)... Current state: $STATE"
+            sleep 60
+          done
+          echo "Timeout waiting for draining to complete"
+          exit 1
+          sleep 15   
+
+      - name: Deploy Application
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Dynamic workflow name based on instance number
+          WORKFLOW_FILE="${{ inputs.service }}-web${{ inputs.instance_number }}.yaml"
+          
+          get_run_id() {
+            gh run list --workflow "$1" --json databaseId,status,headBranch \
+              --limit 1 --jq '.[0].databaseId'
+          }
+
+          wait_for_workflow_completion() {
+            local run_id=$1
+            local workflow_name=$2
+            local status=""
+
+            echo "Waiting for workflow $workflow_name (run ID: $run_id) to complete..."
+            for i in {1..30}; do
+              status=$(gh run view "$run_id" --json status,conclusion --jq '.status')
+              if [[ "$status" == "completed" ]]; then
+                conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion')
+                echo "$workflow_name finished with status: $conclusion"
+                if [[ "$conclusion" != "success" ]]; then
+                  echo "$workflow_name failed. Exiting."
+                  exit 1
+                fi
+                return
+              fi
+              echo "Still running... ($i/30)"
+              sleep 30
+            done
+            echo "Timeout waiting for $workflow_name to complete"
+            exit 1
+          }
+        
+          gh workflow run "$WORKFLOW_FILE" \
+            --ref main \
+            -f instance_id="${{ inputs.instance_id }}"            
+
+          sleep 15
+          RUN_ID=$(get_run_id "$WORKFLOW_FILE")
+          wait_for_workflow_completion "$RUN_ID" "$WORKFLOW_FILE"
+          
+      - name: Register to Target Group
+        run: |
+          aws elbv2 register-targets \
+            --target-group-arn "${{ inputs.target_group_arn }}" \
+            --targets Id="${{ inputs.instance_id }}"
+          echo "Registered instance ${{ inputs.instance_id }}"
+
+      - name: Verify Health Status
+        run: |
+          for i in {1..30}; do
+            HEALTH=$(aws elbv2 describe-target-health \
+              --target-group-arn "${{ inputs.target_group_arn }}" \
+              --targets Id="${{ inputs.instance_id }}" \
+              --query 'TargetHealthDescriptions[0].TargetHealth.State' \
+              --output text)
+            
+            if [ "$HEALTH" = "healthy" ]; then
+              echo "Instance is healthy"
+              exit 0
+            fi
+            
+            echo "Waiting for instance to become healthy (attempt $i/30)... Current state: $HEALTH"
+            sleep 30
+          done
+          echo "Health check timeout"
+          exit 1

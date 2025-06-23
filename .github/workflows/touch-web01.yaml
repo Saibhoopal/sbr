@@ -1,0 +1,112 @@
+name: '[PROD] Deploy Touch Config via SSM'
+
+on:
+  workflow_call: 
+  workflow_dispatch:
+    inputs:
+      instance_id:
+        required: true
+        type: string
+
+env:
+  INSTANCE_ID: ${{ inputs.instance_id }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  BIZLOGIC_IP: 172.16.55.85
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_1 }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_1 }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Generate TEMP GUID
+        id: guid
+        run: |
+          echo "TEMP_GUID=$(uuidgen)" >> $GITHUB_ENV
+
+      - name: Create zip payload and base64 encode
+        id: pkg
+        run: |
+          zip -r touch-configs.zip touch/
+          echo "PAYLOAD=$(base64 -w 0 touch-configs.zip)" >> $GITHUB_ENV
+
+      - name: Upload zip to EC2 and extract
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Upload and extract configs" \
+            --parameters commands="\
+              echo $PAYLOAD | base64 -d > /tmp/${{ env.TEMP_GUID }}.zip ; \
+              mkdir -p /tmp/${{ env.TEMP_GUID }} ; \
+              unzip /tmp/${{ env.TEMP_GUID }}.zip -d /tmp/${{ env.TEMP_GUID }}" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Stop Tomcat via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="sudo systemctl stop touch && sleep 10" \
+            --region ${{ env.AWS_REGION }}
+
+#      - name: Patch Bizlogic IP and deploy via SSM
+#        run: |
+#          aws ssm send-command \
+#            --instance-ids "${{ env.INSTANCE_ID }}" \
+#            --document-name "AWS-RunShellScript" \
+#            --parameters commands="\
+#              for file in /tmp/${{ env.TEMP_GUID }}/touch/localhost/*.xml; do \
+#                xmlstarlet ed -L \
+#                  -u \"//Environment[@Name='bizlogic.rest.url']/value\" \
+#                  -v \"http://${{ env.BIZLOGIC_IP }}:8080/SwBizLogic/Service.svc\" \
+#                  \"$file\" ; \
+#              done ; \
+#              sudo rm -rf /opt/touch/apache-tomcat/conf/Catalina/localhost/* ; \
+#              sudo rm -rf /opt/touch/apache-tomcat/webapps/config/* ; \
+#              sudo cp -r /tmp/${{ env.TEMP_GUID }}/touch/localhost/* /opt/touch/apache-tomcat/conf/Catalina/localhost/ ; \
+#              sudo cp -r /tmp/${{ env.TEMP_GUID }}/touch/config/* /opt/touch/apache-tomcat/webapps/config/"
+
+      - name: Patch Bizlogic IP and deploy via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --region ${{ env.AWS_REGION }} \
+            --parameters commands='[
+              "for file in /tmp/${{ env.TEMP_GUID }}/touch/localhost/*.xml; do",
+              "  xmlstarlet ed -L -u \\"//Environment[@Name='\''bizlogic.rest.url'\'']/value\\" -v \\"http://${{ env.BIZLOGIC_IP }}:8080/SwBizLogic/Service.svc\\" \\"$file\\"",
+              "done",
+              "sudo rm -rf /opt/touch/apache-tomcat/conf/Catalina/localhost/*",
+              "sudo rm -rf /opt/touch/apache-tomcat/webapps/config/*",
+              "sudo cp -r /tmp/${{ env.TEMP_GUID }}/touch/localhost/* /opt/touch/apache-tomcat/conf/Catalina/localhost/",
+              "sudo cp -r /tmp/${{ env.TEMP_GUID }}/touch/config/* /opt/touch/apache-tomcat/webapps/config/"
+            ]'
+
+      - name: Start Tomcat via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="sudo systemctl start touch && sleep 10" \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Clean up temp files via SSM
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="rm -rf /tmp/${{ env.TEMP_GUID }}* " \
+            --region ${{ env.AWS_REGION }}

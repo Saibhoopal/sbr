@@ -1,0 +1,141 @@
+name: "Rolling Deployment Orchestration"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_group_arn:
+        description: "Target Group ARN"
+        required: true
+      service:
+        required: true
+        type: string        
+#on: 
+#  workflow_dispatch:
+#  push:
+#    paths:
+#      - 'touch/**'
+#    branches:
+#      - main
+
+#env: 
+#  TARGET_GROUP_ARN: ""
+#  SERVICE: "touch"
+#  BIZLOGIC_IP: "172.16.55.85"
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest #[self-hosted, linux, x64] #
+    permissions:
+      contents: read    
+      actions: write     
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_1 }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_1 }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Verify AWS Permissions
+        run: |
+          aws sts get-caller-identity
+          aws elbv2 describe-target-health \
+            --target-group-arn "${{ inputs.target_group_arn }}" \
+            --query "TargetHealthDescriptions[].Target.Id" \
+            --output text
+
+      - name: Get Target Group Instances with Names
+        id: get_instances
+        run: |
+          # Get instance IDs from target group
+          INSTANCE_IDS=$(aws elbv2 describe-target-health \
+            --target-group-arn "${{ inputs.target_group_arn }}" \
+            --query 'TargetHealthDescriptions[].Target.Id' \
+            --output text)
+          
+          # Get instance details (including Name tags)
+          INSTANCE_DETAILS=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_IDS \
+            --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`Name`].Value | [0]]' \
+            --output json)
+          
+          # Convert to proper JSON array
+          INSTANCE_DETAILS_JSON=$(echo "$INSTANCE_DETAILS" | jq -c 'map({instance_id: .[0], instance_name: .[1]})')
+          
+          # Output for GitHub Actions
+          echo "instance_details=${INSTANCE_DETAILS_JSON}" >> $GITHUB_OUTPUT
+          echo "Found instances:"
+          echo "$INSTANCE_DETAILS_JSON"
+
+      - name: Process Instances
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          INSTANCES='${{ steps.get_instances.outputs.instance_details }}'
+
+          # Helper function to get the latest run ID
+          get_run_id() {
+            gh run list --workflow "$1" --json databaseId,status,headBranch \
+              --limit 1 --jq '.[0].databaseId'
+          }
+
+          # Helper function to wait for workflow completion
+          wait_for_workflow_completion() {
+            local run_id=$1
+            local workflow_name=$2
+            local status=""
+
+            echo "Waiting for workflow $workflow_name (run ID: $run_id) to complete..."
+            for i in {1..30}; do
+              status=$(gh run view "$run_id" --json status,conclusion --jq '.status')
+              if [[ "$status" == "completed" ]]; then
+                conclusion=$(gh run view "$run_id" --json conclusion --jq '.conclusion')
+                echo "$workflow_name finished with status: $conclusion"
+                if [[ "$conclusion" != "success" ]]; then
+                  echo "$workflow_name failed. Exiting."
+                  exit 1
+                fi
+                return
+              fi
+              echo "Still running... ($i/30)"
+              sleep 60
+            done
+            echo "Timeout waiting for $workflow_name to complete"
+            exit 1
+          }
+
+          # Process each instance dynamically
+          echo "$INSTANCES" | jq -c '.[]' | while read -r INSTANCE; do
+            INSTANCE_ID=$(echo "$INSTANCE" | jq -r '.instance_id')
+            INSTANCE_NAME=$(echo "$INSTANCE" | jq -r '.instance_name')
+      
+            # Extract the instance number from the name (e.g., web01 → 01)
+            INSTANCE_NUMBER=$(echo "$INSTANCE_NAME" | grep -oE '[0-9]+' | head -n1)
+      
+            if [[ -n "$INSTANCE_NUMBER" ]]; then
+              WORKFLOW_FILE="webapp-deploy-dynamic.yaml"
+        
+              if [[ -f ".github/workflows/$WORKFLOW_FILE" ]]; then
+                echo "Processing instance: $INSTANCE_NAME ($INSTANCE_ID) — Triggering $WORKFLOW_FILE"
+          
+                gh workflow run "$WORKFLOW_FILE" \
+                  --ref main \
+                  -f instance_id="$INSTANCE_ID" \
+                  -f target_group_arn="${{ inputs.target_group_arn }}" \
+                  -f instance_number="$INSTANCE_NUMBER" \
+                  -f service="${{ inputs.service }}"
+
+                sleep 15  # Brief pause to allow workflow to register
+          
+                RUN_ID=$(get_run_id "$WORKFLOW_FILE")
+                wait_for_workflow_completion "$RUN_ID" "$WORKFLOW_FILE"
+              else
+                echo "No matching workflow file found for $INSTANCE_NAME (expected: $WORKFLOW_FILE)"
+              fi
+            else
+              echo "Skipping instance with no detectable number: $INSTANCE_NAME"
+            fi
+          done
